@@ -12,9 +12,9 @@ def check_save_path(prefix, validation):
     log_save_path = os.path.join('logs', prefix + '.log')
     with open(log_save_path, 'w') as f_log:
         if validation:
-            f_log.write('epoch,loss,accuracy,validation loss,validation accuracy\n')
+            f_log.write('epoch,loss,validation loss\n')
         else:
-            f_log.write('epoch,loss,accuracy\n')
+            f_log.write('epoch,loss\n')
     # model path
     if os.path.isdir('models') == False:
         os.mkdir('models')
