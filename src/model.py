@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 class BaseModel(torch.nn.Module):
     def __init__(self, args):
@@ -23,17 +24,6 @@ class BaseModel(torch.nn.Module):
     def _softmax(self):
         return torch.nn.Softmax(dim=1)
 
-    def save(self, filename):
-        state_dict = {name:value.cpu() for name, value \
-                in self.state_dict().items()}
-        status = {'state_dict':state_dict,}
-        with open(filename, 'wb') as f_model:
-            torch.save(status, f_model)
-    
-    def load(self, filename):
-        status = torch.load(filename)
-        self.load_state_dict(status['state_dict'])
-    
 class VideoRNN(BaseModel):
     def __init__(self, args, train=True):
         # args is a dictionary containing required arguments:
@@ -50,7 +40,7 @@ class VideoRNN(BaseModel):
             self.load(self._load_model_filename)
 
     def _init_network(self):
-        self._rnn = self._gru(self._embed_dim, self._hidden_size)
+        self._rnn = self._gru(4096, self._hidden_size)
         self._hidden_multiply = self._rnn_layers
         if self._bidirectional:
             self._hidden_multiply *= 2
@@ -108,3 +98,20 @@ class VideoCaption(torch.nn.Module):
         pred_c = self._caption_rnn(c_caption, c_length)
         pred_w = self._caption_rnn(w_caption, w_length)
         return pred_video, pred_c, pred_w
+
+    def count_triplet(self, video, c_caption, w_caption):
+        c_distance = F.pairwise_distance(video, c_caption)
+        w_distance = F.pairwise_distance(video, w_caption)
+        return c_distance, w_distance
+
+    def save(self, filename):
+        state_dict = {name:value.cpu() for name, value \
+                in self.state_dict().items()}
+        status = {'state_dict':state_dict,}
+        with open(filename, 'wb') as f_model:
+            torch.save(status, f_model)
+    
+    def load(self, filename):
+        status = torch.load(filename)
+        self.load_state_dict(status['state_dict'])
+    
