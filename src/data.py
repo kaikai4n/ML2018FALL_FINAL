@@ -1,7 +1,5 @@
 import pickle
 import numpy as np
-from torch.utils.data import Dataset
-import torch
 import random
 import os
 ##############################################
@@ -18,14 +16,16 @@ class CaptionDataLoader():
         # video base filename is given so that the returned video captioning 
         # is ordered by the filename order
         self._video_filenames = video_filenames
-        self.__create_word_dict = create_word_dict
+        self._create_word_dict_bool = create_word_dict
         self._word_dict_filename = word_dict_filename
-        self._save_word_dict = save_word_dict
-        if self.__create_word_dict == False:
+        # save word_dict after calling load_caption()
+        self._save_word_dict_bool = save_word_dict
+        if self._create_word_dict_bool == False:
             if word_dict_filename is None:
                 raise Exception('"word_dict_filename" for loading word \
                         dictionary index is not given')
             self._load_word_dict(word_dict_filename)
+        # else, create word_dict after calling load_caption()
 
     def _save_word_dict(self, filename):
         with open(filename, 'wb') as f:
@@ -59,18 +59,15 @@ class CaptionDataLoader():
         content = [content_dict[filename.rstrip('.npy')] for filename in self._video_filenames]
         print('Caption proccessing...')
         self._data_processing(content)
-        if self._create_word_dict:
+        if self._create_word_dict_bool:
             self._create_word_dict(content)
-        padded_content = self._to_one_hot_value(content)
-        import pdb
-        pdb.set_trace()
-        exit()
-        if self._save_word_dict:
+        transformed_content = self._to_one_hot_value(content)
+        if self._save_word_dict_bool:
             if self._word_dict_filename is None:
                 raise Exception('"word_dict_filename" saving word dict\
                         is not given')
-            self._save_word_dict(word_dict_filename)
-        return content
+            self._save_word_dict(self._word_dict_filename)
+        return transformed_content
 
     def _data_processing(self, content):
         for i, _ in enumerate(content):
@@ -88,7 +85,6 @@ class CaptionDataLoader():
             sentence = sentence.replace(old, new)
         sentence = '<SOS> ' + sentence + ' <EOS>'
         return sentence.split()
-
     
     def load_data_y(self, filename, encoding='utf-8'):
         raise NotImplementedError
@@ -97,30 +93,14 @@ class CaptionDataLoader():
         print('To word dictionary value...')
         transformed_content = [[[self._word_dict[word] for word in line] \
                 for line in one_data] for one_data in content]
-        print('Start padding...')
-        self._sentence_length = [len(sentence) \
-                for sentence in transformed_content]
-        max_length = max(self._sentence_length)
-        padded_content = self._pad_equal_length(transformed_content,\
-                max_length)
-        return padded_content
-
-    def _pad_equal_length(self, content, length):
-        padded_content = [ele + (length-len(ele))*[self._word_dict['<PAD>']] \
-                for ele in content]
-        return padded_content
-
-    def _to_numpy(self, content):
-        return np.asarray(content)
-
-    def get_sentence_length(self):
-        return self._sentence_length
+        return transformed_content
 
 class VideoDataLoader():
     def __init__(self):
         pass
 
     def load_training_data(self, data_path):
+        print('Loading video data...')
         self._parse_filenames(data_path)
         data_list = [self._load_from_numpy(filename) \
                 for filename in self._full_filenames]
@@ -145,28 +125,34 @@ class VideoDataLoader():
     def get_base_filenames(self):
         return self._base_filenames
 
-class DcardDataset(Dataset):
-    def __init__(self, total_data, x, y, length):
-        super(DcardDataset, self).__init__()
-        self._x = x
-        self._y = y
-        self._total_data = total_data
-        self._length = length
+class DataLoader():
+    def __init__(self,
+            video_dir,
+            caption_filename,
+            load_word_dict=True,
+            word_dict_filename=None,):
+        self._caption_filename = caption_filename
+        self._vdl = VideoDataLoader()
+        self._train_video_x = self._vdl.load_training_data(video_dir)
+        video_filenames = self._vdl.get_base_filenames()
+        if load_word_dict:
+            self._cdl = CaptionDataLoader(
+                    video_filenames=video_filenames,
+                    create_word_dict=False,
+                    word_dict_filename=word_dict_filename)
+        else:
+            self._cdl = CaptionDataLoader(
+                    video_filenames=video_filenames,
+                    create_word_dict=True, 
+                    save_word_dict=True,
+                    word_dict_filename=word_dict_filename)
 
-    def __len__(self):
-        return self._total_data
+    def load_data(self):
+        self._train_caption_x = self._cdl.load_caption(self._caption_filename)
+        return self._train_video_x, self._train_caption_x
 
-    def __getitem__(self, i):
-        return self._x[i], self._y[i], self._length[i]
-
-def customed_collate_fn(batch):
-    # sort by sentence length
-    batch = sorted(batch, key=lambda x: -x[2])
-    x, y, length = zip(*batch)
-    x = torch.tensor(x, dtype=torch.long)
-    y = torch.tensor(y, dtype=torch.long)
-    length = torch.tensor(length, dtype=torch.long)
-    return x, y, length
+    def get_word_dict_len(self):
+        return self._cdl.get_word_dict_len()
 
 def cut_validation(total_data, data_list, shuffle=True, propotion=0.95):
     # data_list contain [x, y, length]
@@ -181,23 +167,28 @@ def cut_validation(total_data, data_list, shuffle=True, propotion=0.95):
     return (total_train,)+train, (total_data-total_train,)+valid
 
 if __name__ == '__main__':
+    # a higher level loading class
+    dl = DataLoader(
+            video_dir='data/training_data/feat',
+            caption_filename='data/training_label.json',
+            load_word_dict=True,
+            word_dict_filename='word_dict.pkl')
+    train_video_x, train_caption_x = dl.load_data()
+
+    # if one tries to load video and caption seperately
     vdl = VideoDataLoader()
     train_video_x = vdl.load_training_data('data/training_data/feat')
     video_filenames = vdl.get_base_filenames()
     # example for loading word dictionary from file
-    """
     dl = CaptionDataLoader(
             video_filenames=video_filenames,
             create_word_dict=False,
             word_dict_filename='word_dict.pkl') 
-    """
     # example to create own word dictionary via data
     dl = CaptionDataLoader(
             video_filenames=video_filenames,
             create_word_dict=True, 
             save_word_dict=True,
             word_dict_filename='word_dict.pkl')
-    train_x = dl.load_caption('data/training_label.json')
-    #print(train_x.shape)
-    print(train_x[:5][:20])
+    train_caption_x = dl.load_caption('data/training_label.json')
     
