@@ -20,6 +20,7 @@ def train(
         validation,
         batch_size,
         collate_fn,
+        margin,
         model_name,
         vocabulary_size,
         embed_dim,
@@ -92,37 +93,40 @@ def train(
     my_model = my_model.cuda() if use_cuda else my_model
 
     optimizer = torch.optim.Adam(my_model.parameters(), lr=learning_rate)
-    #loss_func = torch.nn.CrossEntropyLoss()
-    loss_func = torch.nn.BCELoss()
+    loss_func = torch.nn.MarginRankingLoss(margin)
     
     print('Start training...')
     for epoch in range(epoches):
         start_time = time.time()
-        total_loss, total_steps, total_accu = 0.0, 0.0, 0.0
+        total_loss, total_steps = 0.0, 0.0
         for step, (video, (c_caption, c_length, c_indices), \
-                (w_caption, w_length, w_length) in enumerate(train_loader):
+                (w_caption, w_length, w_indices)) in enumerate(train_loader):
             duration = time.time() - start_time
-            sys.stdout.write('\rduration: %05.1f, step: %03d ' \
+            sys.stdout.write('\rduration: %05.1f, step: %02d ' \
                     % (duration, step))
             sys.stdout.flush()
+            this_batch_size = video.shape[0]
+            triplet_y = torch.zeros(this_batch_size) - 1
             if use_cuda:
-                x, y, length = x.cuda(), y.cuda(), length.cuda()
+                video = video.cuda()
+                c_caption, c_length, c_indices = \
+                        c_caption.cuda(), c_length.cuda(), c_indices.cuda()
+                w_caption, w_length, w_indices = \
+                        w_caption.cuda(), w_length.cuda(), w_indices.cuda()
+                triplet_y = triplet_y.cuda()
             optimizer.zero_grad()
             pred_video, pred_c, pred_w = my_model.forward(video,\
                     c_caption, c_length, w_caption, w_length)
-            loss = loss_func(pred_y, y)
+            pred_c, pred_w = pred_c[c_indices], pred_w[w_indices]
+            c_distance, w_distance = \
+                    my_model.count_triplet(pred_video, pred_c, pred_w)
+            loss = loss_func(c_distance, w_distance, triplet_y)
             loss.backward()
             optimizer.step()
             total_loss += float(loss.cpu())
-            #total_accu += float(torch.sum(torch.argmax(pred_y, dim=1) == y).cpu())
-            pred_y[pred_y >= 0.5] = 1.0
-            pred_y[pred_y < 0.5] = 0.0
-            total_accu += float(torch.sum(pred_y == y).cpu())
             total_steps += 1
-            x.cpu(), y.cpu(), length.cpu()
 
         total_loss /= total_steps
-        total_accu /= total_train
         if validation:
             with torch.no_grad():
                 my_model.eval()
@@ -133,9 +137,6 @@ def train(
                     y = y.type(torch.float)
                     pred_valid_y = my_model.forward(x, length).squeeze()
                     total_valid_loss += float(loss_func(pred_valid_y, y).cpu())
-                    #total_valid_accu += \
-                    #        float(torch.sum(torch.argmax(
-                    #            pred_valid_y, dim=1) == y).cpu())
                     pred_valid_y[pred_valid_y >= 0.5] = 1.0
                     pred_valid_y[pred_valid_y < 0.5] = 0.0
                     total_valid_accu += \
@@ -152,9 +153,9 @@ def train(
                     (epoch, total_loss, total_accu, \
                     total_valid_loss, total_valid_accu)
         else:
-            progress_msg = 'epoch:%3d, loss:%.3f, accuracy:%3f'\
-                    % (epoch, total_loss, total_accu)
-            log_msg = '%d,%.4f,%.3f\n' % (epoch, total_loss, total_accu)
+            progress_msg = 'epoch:%3d, loss:%.3f'\
+                    % (epoch, total_loss)
+            log_msg = '%d,%.4f\n' % (epoch, total_loss)
         print(progress_msg)
         with open(log_save_path, 'a') as f_log:
             f_log.write(log_msg)
@@ -180,6 +181,7 @@ def main():
             validation=args.validation,
             batch_size=args.batch_size,
             collate_fn=collate_fn,
+            margin=args.margin,
             model_name=args.model,
             vocabulary_size=word_dict_len,
             embed_dim=args.embed_dim,
