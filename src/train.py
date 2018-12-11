@@ -41,10 +41,10 @@ def train(
     if validation:
         train_data, valid_data = cut_validation(
                 total_data, 
-                [train_x, train_y, sentence_length],
+                [train_video, train_caption],
                 shuffle=True)
-        total_train, train_x, train_y, train_length = train_data
-        total_valid, valid_x, valid_y, valid_length = valid_data
+        total_train, train_video, train_caption = train_data
+        total_valid, valid_video, valid_caption = valid_data
     else:
         total_train = total_data
 
@@ -58,10 +58,10 @@ def train(
                 collate_fn=collate_fn
             )
     if validation:
-        dcard_valid_dataset = DcardDataset(
-                total_valid, valid_x, valid_y, sentence_length)
+        valid_dataset = VideoCaptionDataset(
+                total_valid, valid_video, valid_caption)
         valid_loader = torch.utils.data.DataLoader(
-                    dataset=dcard_valid_dataset,
+                    dataset=valid_dataset,
                     batch_size=batch_size,
                     shuffle=True,
                     collate_fn=collate_fn
@@ -130,28 +130,33 @@ def train(
         if validation:
             with torch.no_grad():
                 my_model.eval()
-                total_valid_loss, total_valid_accu, total_valid_step = 0, 0, 0
-                for step, (x, y, length) in enumerate(valid_loader):
+                total_valid_loss, total_valid_steps = 0, 0
+                for step, (video, (c_caption, c_length, c_indices), \
+                        (w_caption, w_length, w_indices)) in enumerate(valid_loader):
+                    this_batch_size = video.shape[0]
+                    triplet_y = torch.zeros(this_batch_size) - 1
                     if use_cuda:
-                        x, y, length = x.cuda(), y.cuda(), length.cuda()
-                    y = y.type(torch.float)
-                    pred_valid_y = my_model.forward(x, length).squeeze()
-                    total_valid_loss += float(loss_func(pred_valid_y, y).cpu())
-                    pred_valid_y[pred_valid_y >= 0.5] = 1.0
-                    pred_valid_y[pred_valid_y < 0.5] = 0.0
-                    total_valid_accu += \
-                            float(torch.sum(pred_valid_y == y).cpu())
-                    total_valid_step += 1
-                    x.cpu(), y.cpu(), length.cpu()
-                total_valid_loss /= total_valid_step
-                total_valid_accu /= total_valid
+                        video = video.cuda()
+                        c_caption, c_length, c_indices = \
+                                c_caption.cuda(), c_length.cuda(), c_indices.cuda()
+                        w_caption, w_length, w_indices = \
+                                w_caption.cuda(), w_length.cuda(), w_indices.cuda()
+                        triplet_y = triplet_y.cuda()
+                    optimizer.zero_grad()
+                    pred_video, pred_c, pred_w = my_model.forward(video,\
+                            c_caption, c_length, w_caption, w_length)
+                    pred_c, pred_w = pred_c[c_indices], pred_w[w_indices]
+                    c_distance, w_distance = \
+                            my_model.count_triplet(pred_video, pred_c, pred_w)
+                    loss = loss_func(c_distance, w_distance, triplet_y)
+                    total_valid_loss += float(loss.cpu())
+                    total_valid_steps += 1
+                total_valid_loss /= total_valid_steps
                 my_model.train()
-            progress_msg = 'epoch:%3d, loss:%.3f, accuracy:%.3f, valid:%.3f, accuracy:%.3f'\
-                    % (epoch, total_loss, total_accu, \
-                    total_valid_loss, total_valid_accu)
-            log_msg = '%d,%.4f,%.3f,%.4f,%.3f\n' % \
-                    (epoch, total_loss, total_accu, \
-                    total_valid_loss, total_valid_accu)
+            progress_msg = 'epoch:%3d, loss:%.3f, valid:%.3f'\
+                    % (epoch, total_loss, total_valid_loss)
+            log_msg = '%d,%.4f,%.4f\n' % \
+                    (epoch, total_loss, total_valid_loss)
         else:
             progress_msg = 'epoch:%3d, loss:%.3f'\
                     % (epoch, total_loss)
