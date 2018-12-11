@@ -42,7 +42,7 @@ def get_args(train=True):
             type=int,
             help='Random seed for numpy and torch.')
     parser.add_argument('-b', '--batch_size',
-            default=512,
+            default=32,
             type=int,
             help='The batch size for training.')
     if train:
@@ -89,7 +89,10 @@ def get_args(train=True):
                 action='store_false',
                 help='To specify not to use bidirectional\
                         for RNN.')
-                
+        parser.add_argument('--margin',
+                default=0.1,
+                type=float,
+                help='The margin used in triplet loss.')
     else:
         parser.add_argument('--ensemble',
                 default=False,
