@@ -47,7 +47,7 @@ def _padding(caption_list):
     padded_caption = [line+[2]*(max_length-len(line)) for line in caption_list]
     return padded_caption, length
             
-def _sort_and_get_indices(caption, length)
+def _sort_and_get_indices(caption, length):
     caption = torch.tensor(caption, dtype=torch.long)
     length = torch.tensor(length, dtype=torch.long)
     length, indices = torch.sort(length, descending=True)
