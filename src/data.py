@@ -154,7 +154,7 @@ class DataLoader():
     def get_word_dict_len(self):
         return self._cdl.get_word_dict_len()
 
-def cut_validation(total_data, data_list, shuffle=True, propotion=0.95):
+def cut_validation(total_data, data_list, shuffle=True, propotion=0.9):
     # data_list contain [x, y, length]
     # propotion is [0, 1]
     if shuffle:
