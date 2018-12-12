@@ -6,6 +6,7 @@ import os
 # Need to check if json package is available #
 import json
 ##############################################
+import pandas as pd
 
 class CaptionDataLoader():
     def __init__(self,
@@ -51,7 +52,7 @@ class CaptionDataLoader():
             content = json.load(f)
         return content
 
-    def load_caption(self, caption_filename):
+    def load_training_caption(self, caption_filename):
         print('Loading Caption Data...')
         json_content = self._load_from_json(caption_filename)
         content_dict = {one_data['id']: one_data['caption'] \
@@ -85,15 +86,68 @@ class CaptionDataLoader():
             sentence = sentence.replace(old, new)
         sentence = '<SOS> ' + sentence + ' <EOS>'
         return sentence.split()
-    
-    def load_data_y(self, filename, encoding='utf-8'):
-        raise NotImplementedError
-
+        
     def _to_one_hot_value(self, content, max_sentence_len=500):
         print('To word dictionary value...')
-        transformed_content = [[[self._word_dict[word] for word in line] \
+        transformed_content = [[[self._word_dict[word] \
+                if word in self._word_dict else self._word_dict['<UNK>'] \
+                for word in line] \
                 for line in one_data] for one_data in content]
         return transformed_content
+    
+    def load_testing_caption(self, filename):
+        # testing caption filetype is csv, not json
+        if self._word_dict is None:
+            raise Exception('Word dictionary file not loaded error.')
+        # I don't use pandas.read_csv() to read since the symbol for
+        # seperating the column is ambiguous in the csv file,
+        # so I do my best to parse the file myself
+        with open(filename, 'r', encoding='utf-8-sig') as f:
+            content = f.read()
+        content = list(filter(None, content.split('\n')))
+        video_filenames, options = [], []
+        for line in content:
+            video_filename, option = line.split(',', 1)
+            option_seperated = self._split_options(option, 5)
+            if len(option_seperated) != 5:
+                print(option_seperated)
+                raise Exception('Loading testing data error. Expect to get \
+                         5 options but got %d options for line %s' % \
+                         (len(option_seperated), line))
+            video_filenames.append(video_filename)
+            options.append(option_seperated)
+        self._data_processing(options)
+        transformed_options = self._to_one_hot_value(options)
+        return video_filenames, transformed_options
+
+    def _split_options(self, options, max_options):
+        def _go_split(options, sorted_indices):
+            sorted_indices.append(len(options))
+            return [options[sorted_indices[i]:sorted_indices[i+1]].lstrip(',')\
+                    for i in range(len(sorted_indices)-1)]
+        split_indices = set([0])
+        for char_index, one_char in enumerate(options[:-1]):
+            if options[char_index] == ',' and options[char_index+1].istitle():
+                split_indices.add(char_index)
+        if len(split_indices) >= max_options:
+            return _go_split(options, sorted(list(split_indices)))
+        for char_index, one_char in enumerate(options[:-1]):
+            if options[char_index] == '.' and options[char_index+1] == ',':
+                split_indices.add(char_index+1)
+        if len(split_indices) >= max_options:
+            return _go_split(options, sorted(list(split_indices)))
+        while len(split_indices) < max_options:
+            value_changed = False
+            for char_index, one_char in enumerate(options):
+                if options[char_index] == ',':
+                    if char_index not in split_indices:
+                        split_indices.add(char_index)
+                        value_changed = True
+                        break
+            if value_changed == False:
+                print('Warning: Find one data has less than 5 options.')
+                break
+        return _go_split(options, sorted(list(split_indices)))
 
 class VideoDataLoader():
     def __init__(self):
@@ -133,23 +187,31 @@ class DataLoader():
             word_dict_filename=None,):
         self._caption_filename = caption_filename
         self._vdl = VideoDataLoader()
-        self._train_video_x = self._vdl.load_training_data(video_dir)
-        video_filenames = self._vdl.get_base_filenames()
+        self._video_x = self._vdl.load_training_data(video_dir)
+        self._video_filenames = self._vdl.get_base_filenames()
         if load_word_dict:
             self._cdl = CaptionDataLoader(
-                    video_filenames=video_filenames,
+                    video_filenames=self._video_filenames,
                     create_word_dict=False,
                     word_dict_filename=word_dict_filename)
         else:
             self._cdl = CaptionDataLoader(
-                    video_filenames=video_filenames,
+                    video_filenames=self._video_filenames,
                     create_word_dict=True, 
                     save_word_dict=True,
                     word_dict_filename=word_dict_filename)
 
-    def load_data(self):
-        self._train_caption_x = self._cdl.load_caption(self._caption_filename)
-        return self._train_video_x, self._train_caption_x
+    def load_data(self, train=True):
+        if train:
+            self._caption_x = \
+                    self._cdl.load_training_caption(self._caption_filename)
+        else:
+            self._ordered_video_filenames, self._caption_x = \
+                    self._cdl.load_testing_caption(self._caption_filename)
+            video_dict = {filename.rstrip('.npy'): value for filename, value \
+                    in zip(self._video_filenames, self._video_x)}
+            self._video_x = [video_dict[filename] for filename in self._ordered_video_filenames]
+        return self._video_x, self._caption_x
 
     def get_word_dict_len(self):
         return self._cdl.get_word_dict_len()
