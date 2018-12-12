@@ -34,10 +34,7 @@ class VideoRNN(BaseModel):
         # dropout: dropout rate of RNN 
         # bidirectional: RNN is bidirectional or not
         super(VideoRNN, self).__init__(args)
-        if train:
-            self._init_network()
-        else:
-            self.load(self._load_model_filename)
+        self._init_network()
 
     def _init_network(self):
         self._rnn = self._gru(4096, self._hidden_size)
@@ -62,10 +59,7 @@ class CaptionRNN(BaseModel):
         # dropout: dropout rate of RNN 
         # bidirectional: RNN is bidirectional or not
         super(CaptionRNN, self).__init__(args)
-        if train:
-            self._init_network()
-        else:
-            self.load(self._load_model_filename)
+        self._init_network()
 
     def _init_network(self):
         self._embedding = torch.nn.Embedding(
@@ -86,12 +80,13 @@ class CaptionRNN(BaseModel):
         trans_hidden = hidden.transpose(0, 1).contiguous().view(batch_size, -1)
         return trans_hidden
 
-class VideoCaption(torch.nn.Module):
+class VideoCaption(BaseModel):
     def __init__(self, args, train=True):
-        super(VideoCaption, self).__init__()
-        self._args = args
+        super(VideoCaption, self).__init__(args)
         self._video_rnn = VideoRNN(args, train=train)
         self._caption_rnn = CaptionRNN(args, train=train)
+        if train == False:
+            self.load(self._load_model_filename)
 
     def forward(self, video, c_caption, c_length, w_caption, w_length):
         pred_video = self._video_rnn(video)
@@ -103,6 +98,30 @@ class VideoCaption(torch.nn.Module):
         c_distance = F.pairwise_distance(video, c_caption)
         w_distance = F.pairwise_distance(video, w_caption)
         return c_distance, w_distance
+
+    def infer(self, video, caption, length):
+        # infer testing data
+        # video = [batch, 80, 4096]
+        # caption = [batch*5, max_length]
+        pred_video = self._video_rnn(video)
+        pred_captions = self._caption_rnn(caption, length)
+        return pred_video, pred_captions
+
+    def count_argmin_distance(self, pred_video, pred_caption):
+        # input arguments:
+        # pred_video = [batch, hidden_size]
+        # pred_caption = [batch*5, hidden_size]
+        # output:
+        # output = [batch]
+        batch_size = pred_video.shape[0]
+        caption_len = pred_caption.shape[0]
+        if caption_len % 5 != 0 or caption_len / 5 != batch_size:
+            raise Exception('Predicted caption shape should be multiple of 5')
+        pred_video = pred_video.repeat(1, 5).view(5*batch_size, -1)
+        distances = F.pairwise_distance(pred_video, pred_caption)
+        distances = distances.view(-1, 5)
+        output = torch.argmin(distances, dim=1)
+        return output
 
     def save(self, filename):
         state_dict = {name:value.cpu() for name, value \
