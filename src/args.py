@@ -5,8 +5,7 @@ def check_model(model_name):
     try:
         model_object = getattr(model, model_name)
     except AttributeError:
-        print('Model not found:', model_name)
-        exit()
+        raise Exception('Model not found:%s' % model_name)
 
 def get_args(train=True):
     parser = argparse.ArgumentParser()
@@ -52,12 +51,12 @@ def get_args(train=True):
                 help='To split validation or not.')
         parser.add_argument('-e', '--epoches',
                 type=int,
-                default=50)
+                default=200)
         parser.add_argument('-lr', '--learning_rate',
                 type=float,
-                default=0.001)
+                default=0.0005)
         parser.add_argument('--save_intervals',
-                default=5,
+                default=10,
                 type=int,
                 help='The epoch intervals to save models')
         parser.add_argument('--prefix',
