@@ -3,22 +3,27 @@ import torch
 import random
 
 class VideoCaptionDataset(Dataset):
-    def __init__(self, total_data, video, caption):
+    def __init__(self, total_data, video, caption, train=True):
         # video = [total_data, 80, 4096]
         # caption = [total_data, captions_num, sequence_length]
         super(VideoCaptionDataset, self).__init__()
         self._video = video
         self._caption = caption
         self._total_data = total_data
-        self._caption_len = [len(one_data) for one_data in self._caption]
-        self._total_captions = sum(self._caption_len)
+        self._train = train
+        if self._train:
+            self._caption_len = [len(one_data) for one_data in self._caption]
+            self._total_captions = sum(self._caption_len)
 
     def __len__(self):
         return self._total_data
 
     def __getitem__(self, i):
-        correct_caption, wrong_caption = self._rand_two_captions(i)
-        return self._video[i], correct_caption, wrong_caption
+        if self._train:
+            correct_caption, wrong_caption = self._rand_two_captions(i)
+            return self._video[i], correct_caption, wrong_caption
+        else:
+            return self._video[i], self._caption[i]
 
     def _rand_two_captions(self, correct_i):
         correct_caption = random.sample(self._caption[correct_i], 1)
@@ -40,6 +45,15 @@ def customed_collate_fn_for_training(batch):
             _sort_and_get_indices(wrong_caption, wrong_length)
     return video, (correct_caption, correct_length, correct_indices),\
             (wrong_caption, wrong_length, wrong_indices)
+
+def customed_collate_fn_for_testing(batch):
+    video, caption = zip(*batch)
+    video = torch.tensor(video, dtype=torch.float)
+    # Flatten [batch, 5, sequence_len] to [batch*5, sequence_len]
+    caption = [line for one_data in caption for line in one_data]
+    caption, length = _padding(caption)
+    caption, length, indices = _sort_and_get_indices(caption, length)
+    return video, (caption, length, indices)
 
 def _padding(caption_list):
     length = [len(line) for line in caption_list]
