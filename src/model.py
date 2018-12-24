@@ -69,6 +69,9 @@ class CaptionRNN(BaseModel):
         if self._bidirectional:
             self._hidden_multiply *= 2
 
+    def get_output_dim(self):
+        return self._hidden_multiply * self._hidden_size
+
     def forward(self, x, x_length):
         # x is a tensor of sentence: [batch, max_sentence_length]
         # x_length is the length number of each sentence: [batch]
@@ -134,3 +137,31 @@ class VideoCaption(BaseModel):
         status = torch.load(filename)
         self.load_state_dict(status['state_dict'])
     
+class VCCommonSpace(VideoCaption):
+    # Video Caption model with common space learning
+    def __init__(self, args, train=True):
+        super(VCCommonSpace, self).__init__(args, train=True)
+        self._in_space_dim = self._caption_rnn.get_output_dim()
+        self._common_space = CommonSpace(self._in_space_dim)
+        if train == False:
+            self.load(self._load_model_filename)
+
+    def forward(self, video, c_caption, c_length, w_caption, w_length):
+        pred_video = self._video_rnn(video)
+        pred_c = self._caption_rnn(c_caption, c_length)
+        pred_w = self._caption_rnn(w_caption, w_length)
+        return pred_video, pred_c, pred_w
+
+class CommonSpace(torch.nn.Module):
+    def __init__(self, in_space_dim, out_space_dim=128):
+        super(CommonSpace, self).__init__()
+        self._init_network(in_space_dim, out_space_dim)
+
+    def _init_network(self, in_space_dim, out_space_dim):
+        self._linear = torch.nn.Sequential(
+                    torch.nn.Linear(in_space_dim, out_space_dim),
+                    torch.nn.BatchNorm1d(out_space_dim),
+                )
+
+    def forward(self, x):
+        return self._linear(x)
